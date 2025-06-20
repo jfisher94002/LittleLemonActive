@@ -1,0 +1,167 @@
+name: Django CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 4
+      matrix:
+        python-version: [3.9, 3.10, 3.11, 3.12]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Try to find requirements.txt in different locations
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        elif [ -f littlelemon/requirements.txt ]; then
+          pip install -r littlelemon/requirements.txt
+        else
+          # Fallback to installing packages directly
+          pip install django djangorestframework djoser mysql-connector-python
+        fi
+    
+    - name: Run migrations
+      env:
+        DJANGO_SETTINGS_MODULE: littlelemon.settings
+      run: |
+        # Try to find manage.py in different locations
+        if [ -f manage.py ]; then
+          python manage.py migrate
+        elif [ -f littlelemon/manage.py ]; then
+          cd littlelemon && python manage.py migrate
+        fi
+    
+    - name: Run tests
+      env:
+        DJANGO_SETTINGS_MODULE: littlelemon.settings
+      run: |
+        # Try to find manage.py in different locations
+        if [ -f manage.py ]; then
+          python manage.py test
+        elif [ -f littlelemon/manage.py ]; then
+          cd littlelemon && python manage.py test
+        fi
+    
+    - name: Run Django system checks
+      env:
+        DJANGO_SETTINGS_MODULE: littlelemon.settings
+      run: |
+        # Try to find manage.py in different locations
+        if [ -f manage.py ]; then
+          python manage.py check
+        elif [ -f littlelemon/manage.py ]; then
+          cd littlelemon && python manage.py check
+        fi
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    
+    - name: Install linting dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort
+    
+    - name: Lint with flake8
+      run: |
+        # Determine the correct directory to lint
+        if [ -f manage.py ]; then
+          LINT_DIR="."
+        elif [ -f littlelemon/manage.py ]; then
+          LINT_DIR="littlelemon"
+        else
+          LINT_DIR="."
+        fi
+        cd $LINT_DIR
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 . --count --exit-zero --statistics
+    
+    - name: Check code formatting with black
+      run: |
+        # Determine the correct directory to check
+        if [ -f manage.py ]; then
+          BLACK_DIR="."
+        elif [ -f littlelemon/manage.py ]; then
+          BLACK_DIR="littlelemon"
+        else
+          BLACK_DIR="."
+        fi
+        cd $BLACK_DIR
+        black --check --diff .
+    
+    - name: Check import sorting with isort
+      run: |
+        # Determine the correct directory to check
+        if [ -f manage.py ]; then
+          ISORT_DIR="."
+        elif [ -f littlelemon/manage.py ]; then
+          ISORT_DIR="littlelemon"
+        else
+          ISORT_DIR="."
+        fi
+        cd $ISORT_DIR
+        isort --check-only --diff .
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    
+    - name: Install security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety
+    
+    - name: Run bandit security linter
+      run: |
+        # Determine the correct directory to scan
+        if [ -f manage.py ]; then
+          BANDIT_DIR="."
+        elif [ -f littlelemon/manage.py ]; then
+          BANDIT_DIR="littlelemon"
+        else
+          BANDIT_DIR="."
+        fi
+        cd $BANDIT_DIR
+        bandit -r . -x ./venv,./env,./.venv
+    
+    - name: Check for known security vulnerabilities
+      run: |
+        # Determine the correct directory for requirements.txt
+        if [ -f requirements.txt ]; then
+          safety check --json || true
+        elif [ -f littlelemon/requirements.txt ]; then
+          cd littlelemon && safety check --json || true
+        else
+          echo "No requirements.txt found, skipping safety check"
+        fi
