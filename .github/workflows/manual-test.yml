@@ -1,0 +1,199 @@
+name: Manual Test Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of tests to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - unit
+        - models
+        - views
+        - specific
+      test_module:
+        description: 'Specific test module (if "specific" selected above)'
+        required: false
+        default: ''
+        type: string
+      python_version:
+        description: 'Python version to test with'
+        required: true
+        default: '3.11'
+        type: choice
+        options:
+        - '3.9'
+        - '3.10'
+        - '3.11'
+        - '3.12'
+      verbose:
+        description: 'Verbose output'
+        required: false
+        default: true
+        type: boolean
+      run_migrations:
+        description: 'Run database migrations'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  manual-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ inputs.python_version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python_version }}
+    
+    - name: Display test configuration
+      run: |
+        echo "🧪 Manual Test Run Configuration"
+        echo "================================"
+        echo "Test Type: ${{ inputs.test_type }}"
+        echo "Python Version: ${{ inputs.python_version }}"
+        echo "Verbose Output: ${{ inputs.verbose }}"
+        echo "Run Migrations: ${{ inputs.run_migrations }}"
+        if [ "${{ inputs.test_type }}" = "specific" ]; then
+          echo "Test Module: ${{ inputs.test_module }}"
+        fi
+        echo ""
+    
+    - name: Find Django project directory
+      id: find-django
+      run: |
+        if [ -f "manage.py" ]; then
+          echo "django_dir=." >> $GITHUB_OUTPUT
+          echo "settings_module=littlelemon.settings" >> $GITHUB_OUTPUT
+          echo "✅ Found Django project in root directory"
+        elif [ -f "littlelemon/manage.py" ]; then
+          echo "django_dir=littlelemon" >> $GITHUB_OUTPUT
+          echo "settings_module=littlelemon.settings" >> $GITHUB_OUTPUT
+          echo "✅ Found Django project in littlelemon directory"
+        else
+          echo "❌ ERROR: Could not find manage.py"
+          find . -name "manage.py" -type f
+          exit 1
+        fi
+    
+    - name: Install dependencies
+      run: |
+        echo "📦 Installing dependencies..."
+        python -m pip install --upgrade pip
+        cd ${{ steps.find-django.outputs.django_dir }}
+        if [ -f "requirements.txt" ]; then
+          pip install -r requirements.txt
+          echo "✅ Installed from requirements.txt"
+        else
+          # Fallback installation
+          pip install django djangorestframework djoser mysql-connector-python
+          echo "✅ Installed fallback packages"
+        fi
+    
+    - name: Run Django system checks
+      env:
+        DJANGO_SETTINGS_MODULE: ${{ steps.find-django.outputs.settings_module }}
+      run: |
+        cd ${{ steps.find-django.outputs.django_dir }}
+        echo "🔍 Running Django system checks..."
+        python manage.py check --deploy
+        echo "✅ System checks completed"
+    
+    - name: Run migrations (if enabled)
+      if: inputs.run_migrations == true
+      env:
+        DJANGO_SETTINGS_MODULE: ${{ steps.find-django.outputs.settings_module }}
+      run: |
+        cd ${{ steps.find-django.outputs.django_dir }}
+        echo "🗄️  Running database migrations..."
+        python manage.py migrate
+        echo "✅ Migrations completed"
+    
+    - name: Run all tests
+      if: inputs.test_type == 'all'
+      env:
+        DJANGO_SETTINGS_MODULE: ${{ steps.find-django.outputs.settings_module }}
+      run: |
+        cd ${{ steps.find-django.outputs.django_dir }}
+        echo "🧪 Running all tests..."
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          python manage.py test --verbosity=2
+        else
+          python manage.py test
+        fi
+    
+    - name: Run unit tests only
+      if: inputs.test_type == 'unit'
+      env:
+        DJANGO_SETTINGS_MODULE: ${{ steps.find-django.outputs.settings_module }}
+      run: |
+        cd ${{ steps.find-django.outputs.django_dir }}
+        echo "🧪 Running unit tests..."
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          python manage.py test restaurant --verbosity=2
+        else
+          python manage.py test restaurant
+        fi
+    
+    - name: Run model tests only
+      if: inputs.test_type == 'models'
+      env:
+        DJANGO_SETTINGS_MODULE: ${{ steps.find-django.outputs.settings_module }}
+      run: |
+        cd ${{ steps.find-django.outputs.django_dir }}
+        echo "🧪 Running model tests..."
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          python manage.py test restaurant.tests.test_models --verbosity=2
+        else
+          python manage.py test restaurant.tests.test_models
+        fi
+    
+    - name: Run view tests only
+      if: inputs.test_type == 'views'
+      env:
+        DJANGO_SETTINGS_MODULE: ${{ steps.find-django.outputs.settings_module }}
+      run: |
+        cd ${{ steps.find-django.outputs.django_dir }}
+        echo "🧪 Running view tests..."
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          python manage.py test restaurant.tests.test_views --verbosity=2
+        else
+          python manage.py test restaurant.tests.test_views
+        fi
+    
+    - name: Run specific test module
+      if: inputs.test_type == 'specific' && inputs.test_module != ''
+      env:
+        DJANGO_SETTINGS_MODULE: ${{ steps.find-django.outputs.settings_module }}
+      run: |
+        cd ${{ steps.find-django.outputs.django_dir }}
+        echo "🧪 Running specific test module: ${{ inputs.test_module }}"
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          python manage.py test ${{ inputs.test_module }} --verbosity=2
+        else
+          python manage.py test ${{ inputs.test_module }}
+        fi
+    
+    - name: Test summary
+      if: always()
+      run: |
+        echo ""
+        echo "📊 Test Run Summary"
+        echo "=================="
+        echo "Test Type: ${{ inputs.test_type }}"
+        echo "Python Version: ${{ inputs.python_version }}"
+        if [ "${{ job.status }}" = "success" ]; then
+          echo "Status: ✅ PASSED"
+        else
+          echo "Status: ❌ FAILED"
+        fi
+        echo ""
+        echo "To run tests locally, use:"
+        echo "python manage.py test --settings=littlelemon.settings"

@@ -136,14 +136,9 @@ git clone <repository-url>
 
 ```bash
 1. Clone the repository:
-
-
 - pip package manager
 - Python 3.9 or higher
-
-
 ## Getting Started
-
 - **Testing**: Django's built-in testing framework
 - **Authentication**: Token-based authentication via DRF
 - **Database**: SQLite (development), MySQL (production)
